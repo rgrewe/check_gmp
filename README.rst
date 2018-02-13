@@ -12,9 +12,8 @@ Introduction
 Requirements
 ~~~~~~~~~~~
 - `gvm-tools`_
-
 .. _gvm-tools: https://github.com/greenbone/gvm-tools
-.. Python3
+- Python3
 
 Installing
 ~~~~~~~~~~
