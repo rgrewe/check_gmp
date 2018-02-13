@@ -633,6 +633,10 @@ usage: check_gmp [-h] [--version] [connection_type] ...
         help='Include log messages in output.')
 
     parent_parser.add_argument(
+        '--show-ports', action='store_true',
+        help='Include port of given vulnerable nvt in output.')
+
+    parent_parser.add_argument(
         '--scanend', action='store_true',
         help='Include timestamp of scan end in output.')
 
@@ -897,7 +901,7 @@ def status(version):
                     report_id=report_id,
                     filter='sort-reverse=id result_hosts_only=1 '
                            'min_cvss_base= min_qod= notes=0 apply_overrides=%s overrides=%s '
-                           'first=1 rows=-1 delta_states=cgns %s %s %s'
+                           'first=1 rows=-1 delta_states=cgns %s %s =%s'
                            % (int(args.apply_overrides), int(args.overrides), autofp, levels,
                               args.hostaddress))
 
@@ -1026,25 +1030,7 @@ def filter_report(report):
     log_count = 0
     error_count = 0
 
-    high_oids = []
-    medium_oids = []
-    low_oids = []
-    log_oids = []
-
-    high_names = []
-    medium_names = []
-    low_names = []
-    log_names = []
-
-    high_descriptions = []
-    medium_descriptions = []
-    low_descriptions = []
-    log_descriptions = []
-
-    high_dfn_ids = []
-    medium_dfn_ids = []
-    low_dfn_ids = []
-    log_dfn_ids = []
+    nvts = {'high': [], 'medium': [], 'low': [], 'log': []}
 
     all_results = results.xpath('result')
 
@@ -1068,28 +1054,19 @@ def filter_report(report):
         if threat in 'High':
             high_count += 1
             if args.oid:
-                retrieve_nvt_data(
-                    result, high_oids, high_names,
-                    high_descriptions, high_dfn_ids)
+                nvts['high'].append(retrieve_nvt_data(result))
         elif threat in 'Medium':
             medium_count += 1
             if args.oid:
-                retrieve_nvt_data(
-                    result, medium_oids,
-                    medium_names, medium_descriptions,
-                    medium_dfn_ids)
+                nvts['medium'].append(retrieve_nvt_data(result))
         elif threat in 'Low':
             low_count += 1
             if args.oid:
-                retrieve_nvt_data(
-                    result, low_oids, low_names,
-                    low_descriptions, low_dfn_ids)
+                nvts['low'].append(retrieve_nvt_data(result))
         elif threat in 'Log':
             log_count += 1
             if args.oid:
-                retrieve_nvt_data(
-                    result, log_oids, log_names,
-                    log_descriptions, log_dfn_ids)
+                nvts['log'].append(retrieve_nvt_data(result))
         else:
             end_session('GMP UNKNOWN: Unknown result threat: %s' % threat,
                         NAGIOS_UNKNOWN)
@@ -1143,21 +1120,7 @@ def filter_report(report):
               (args.hostname, report_id))
 
     if args.oid:
-        print_nvt_data(
-            high_oids, high_names, high_descriptions, high_dfn_ids,
-            level='High')
-
-        print_nvt_data(
-            medium_oids, medium_names, medium_descriptions, medium_dfn_ids,
-            level='Medium')
-
-        print_nvt_data(
-            low_oids, low_names, low_descriptions, low_dfn_ids, level='Low')
-
-        if args.showlog:
-            print_nvt_data(
-                log_oids, log_names, log_descriptions, log_dfn_ids,
-                level='Log')
+        print_nvt_data(nvts)
 
     if args.scanend:
         end = report.xpath('//end/text()')[0]
@@ -1175,32 +1138,37 @@ def filter_report(report):
                 (high_count, medium_count, low_count), ret)
 
 
-def retrieve_nvt_data(result, oids, names, descriptions, dfn_ids):
+def retrieve_nvt_data(result):
     '''Retrieve the nvt data out of the result object
 
     This function parse the xml tree to find the important nvt data.
 
     Arguments:
         result {lxml object} -- Result xml object
-        oids {array} -- Array to fill in the oids
-        names {array} -- Array to fill in the names
-        descriptions {Array} -- Array to fill in the descriptions
-        dfn_ids {array} -- Array to fill in the dfn ids
+
+    Returns:
+        Tuple -- List with oid, name, desc, port and dfn
     '''
     oid = result.xpath('nvt/@oid')
     name = result.xpath('nvt/name/text()')
     desc = result.xpath('description/text()')
+    port = result.xpath('port/text()')
 
     if oid:
-        oids.append(oid[0])
+        oid = oid[0]
 
     if name:
-        names.append(name[0])
+        name = name[0]
 
     if desc:
-        descriptions.append(desc[0])
+        desc = desc[0]
     else:
-        descriptions.append('')
+        desc = ''
+
+    if port:
+        port = port[0]
+    else:
+        port = ''
 
     certs = result.xpath('nvt/cert/cert_ref')
 
@@ -1211,31 +1179,32 @@ def retrieve_nvt_data(result, oids, names, descriptions, dfn_ids):
 
         if ref_type in 'DFN-CERT':
             dfn_list.append(ref_id)
-    dfn_ids.append(dfn_list)
+
+    return (oid, name, desc, port, dfn_list)
 
 
-def print_nvt_data(oids, names, descriptions, dfn_ids, level):
+def print_nvt_data(nvts):
     '''Print nvt data
 
-    Prints for each oid found in the array the relevant data
+    Prints for each nvt found in the array the relevant data
 
     Arguments:
-        oids {array} -- Array that holds data for nvts oids
-        names {array} -- Array that holds data for nvts names
-        descriptions {array} -- Array that holds data for nvts descriptions
-        dfn_ids {array} -- Array that holds data for nvts dfn ids
-        level {string} -- nvt level {high, low, medium, log}
+        nvts {object} -- Object holding all nvts
     '''
-    for i, oid in enumerate(oids):
-        print_without_pipe('NVT: %s (%s) %s' % (oid, level, names[i]))
+    for key, nvt_data in nvts.items():
+        if key is 'log' and not args.showlog:
+            continue
+        for nvt in nvt_data:
+            print_without_pipe('NVT: %s (%s) %s' % (nvt[0], key, nvt[1]))
+            if args.show_ports:
+                print_without_pipe('PORT: %s' % (nvt[3]))
+            if args.descr:
+                print_without_pipe('DESCR: %s' % nvt[2])
 
-        if args.descr:
-            print_without_pipe('DESCR: %s' % descriptions[i])
-
-        if args.dfn and dfn_ids:
-            dfn_list = ', '.join(dfn_ids[i])
-            if dfn_list:
-                print_without_pipe('DFN-CERT: %s' % dfn_list)
+            if args.dfn and nvt[4]:
+                dfn_list = ', '.join(nvt[4])
+                if dfn_list:
+                    print_without_pipe('DFN-CERT: %s' % dfn_list)
 
 
 def end_session(msg, nagios_status):
