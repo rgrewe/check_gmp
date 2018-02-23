@@ -878,7 +878,11 @@ def status(version):
                       (args.hostname, report_id))
 
             if args.scanend:
-                end = report.xpath('//end/text()')[0]
+                end = report.xpath('//end/text()')
+                if end:
+                    end = end[0]
+                else:
+                    end = 'Scan still in progress...'
                 print('SCAN_END: %s' % end)
 
             end_session('|High=%i Medium=%i Low=%i' %
